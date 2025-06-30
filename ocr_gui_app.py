@@ -5,6 +5,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import threading
@@ -46,6 +47,7 @@ class OCR_GUI_App:
         self.learning_rate = tk.DoubleVar(value=0.001)
         self.validation_split = tk.DoubleVar(value=0.2)
         self.dropout_rate1 = tk.DoubleVar(value=0.2)
+        self.dropout_rate2 = tk.DoubleVar(value=0.2)
         self.hidden1_neurons = tk.IntVar(value=64)
         self.hidden2_neurons = tk.IntVar(value=32)
         
@@ -395,6 +397,14 @@ class OCR_GUI_App:
         dr1_spinbox.pack(side=tk.LEFT)
         ttk.Label(dr1_frame, text="(After Hidden Layer 1)").pack(side=tk.LEFT, padx=(10,0))
         
+        # Dropout Rate 2
+        dr2_frame = ttk.Frame(reg_frame)
+        dr2_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(dr2_frame, text="Dropout Rate 2:", width=20).pack(side=tk.LEFT)
+        dr2_spinbox = ttk.Spinbox(dr2_frame, from_=0.0, to=0.8, increment=0.05, width=10, textvariable=self.dropout_rate2)
+        dr2_spinbox.pack(side=tk.LEFT)
+        ttk.Label(dr2_frame, text="(After Hidden Layer 2)").pack(side=tk.LEFT, padx=(10,0))
+        
         # Buttons
         button_frame = ttk.Frame(scrollable_frame)
         button_frame.pack(fill=tk.X, padx=10, pady=20)
@@ -411,17 +421,18 @@ class OCR_GUI_App:
         info_frame.pack(fill=tk.X, padx=10, pady=5)
         
         ttk.Label(info_frame, text="""
-Network Architecture (Simplified for Small Datasets):
+Network Architecture (Optimized for Overfitting Prevention):
 Input Layer: 35 neurons (5x7 matrix)
-Hidden Layer 1: Configurable (default: 64 neurons, ReLU)
-Hidden Layer 2: Configurable (default: 32 neurons, ReLU)
+Hidden Layer 1: Configurable (default: 64 neurons, ReLU) + Dropout
+Hidden Layer 2: Configurable (default: 32 neurons, ReLU) + Dropout
 Output Layer: Variable neurons (number of selected characters)
 
-Simplified Design Benefits:
-• Reduced overfitting with limited training data
-• Faster training and convergence
-• Better generalization for small datasets
-• Only essential dropout after first hidden layer
+Anti-Overfitting Features:
+• Double dropout layers after both hidden layers
+• Early stopping with patience=10 epochs
+• Validation-based weight restoration
+• Optimal for larger character sets (4 sets selected)
+• Prevents overfitting while maintaining accuracy
         """, justify=tk.LEFT, font=("Arial", 9)).pack()
         
     def reset_parameters(self):
@@ -431,6 +442,7 @@ Simplified Design Benefits:
         self.learning_rate.set(0.001)
         self.validation_split.set(0.2)
         self.dropout_rate1.set(0.2)
+        self.dropout_rate2.set(0.2)
         self.hidden1_neurons.set(64)
         self.hidden2_neurons.set(32)
         self.include_numbers.set(True)
@@ -449,6 +461,7 @@ Simplified Design Benefits:
             'learning_rate': self.learning_rate.get(),
             'validation_split': self.validation_split.get(),
             'dropout_rate1': self.dropout_rate1.get(),
+            'dropout_rate2': self.dropout_rate2.get(),
             'hidden1_neurons': self.hidden1_neurons.get(),
             'hidden2_neurons': self.hidden2_neurons.get(),
             'include_numbers': self.include_numbers.get(),
@@ -489,6 +502,7 @@ Simplified Design Benefits:
                 self.learning_rate.set(params.get('learning_rate', 0.001))
                 self.validation_split.set(params.get('validation_split', 0.2))
                 self.dropout_rate1.set(params.get('dropout_rate1', 0.2))
+                self.dropout_rate2.set(params.get('dropout_rate2', 0.2))
                 self.hidden1_neurons.set(params.get('hidden1_neurons', 64))
                 self.hidden2_neurons.set(params.get('hidden2_neurons', 32))
                 self.include_numbers.set(params.get('include_numbers', True))
@@ -676,13 +690,29 @@ Simplified Design Benefits:
                 # Train model
                 batch_size = min(self.batch_size.get(), len(X_train))
                 
+                # Early stopping to prevent overfitting
+                early_stopping = EarlyStopping(
+                    monitor='val_loss',
+                    patience=10,
+                    restore_best_weights=True,
+                    verbose=0
+                )
+                
                 history = self.model.fit(
                     X_train, y_train,
                     epochs=self.epochs.get(),
                     validation_data=(X_val, y_val),
                     verbose=0,
-                    batch_size=batch_size
+                    batch_size=batch_size,
+                    callbacks=[early_stopping]
                 )
+                
+                # Check if early stopping was triggered
+                epochs_completed = len(history.history['accuracy'])
+                if epochs_completed < self.epochs.get():
+                    self.log_message(f"Early stopping triggered after {epochs_completed} epochs (prevented overfitting)")
+                else:
+                    self.log_message(f"Training completed all {epochs_completed} epochs")
                 
                 # Final evaluation
                 final_acc = history.history['accuracy'][-1]
@@ -723,6 +753,7 @@ Simplified Design Benefits:
             layers.Dense(self.hidden1_neurons.get(), activation='relu', name='hidden_1'),
             layers.Dropout(self.dropout_rate1.get()),
             layers.Dense(self.hidden2_neurons.get(), activation='relu', name='hidden_2'),
+            layers.Dropout(self.dropout_rate2.get()),
             layers.Dense(num_classes, activation='softmax', name='output')
         ])
         
